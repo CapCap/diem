@@ -158,6 +158,7 @@ module Diem {
         invariant 0 < scaling_factor && scaling_factor <= MAX_SCALING_FACTOR;
     }
 
+
     /// A holding area where funds that will subsequently be burned wait while their underlying
     /// assets are moved off-chain.
     /// This resource can only be created by the holder of a `BurnCapability`. An account that
@@ -169,6 +170,10 @@ module Diem {
         /// A single pending burn amount.
         /// There is no pending burn request if the value in `to_burn` is 0
         to_burn: Diem<CoinType>,
+    }
+
+    resource struct ConcurrentPreburns<CoinType> {
+        inflight_burns: vector<Preburn<CoinType>>,
     }
 
     /// Maximum u64 value.
@@ -451,7 +456,7 @@ module Diem {
     }
 
     ///////////////////////////////////////////////////////////////////////////
-    // Treasury Compliance specific methods for DDs
+    // Treasury Compliance account specific methods
     ///////////////////////////////////////////////////////////////////////////
 
     /// Create a `Preburn<CoinType>` resource
@@ -470,6 +475,9 @@ module Diem {
         include Roles::AbortsIfNotTreasuryCompliance{account: tc_account};
         include AbortsIfNoCurrency<CoinType>;
     }
+    ///////////////////////////////////////////////////////////////////////////
+    // Treasury Compliance specific methods for DDs
+    ///////////////////////////////////////////////////////////////////////////
 
     /// Publishes a `Preburn` resource under `account`. This function is
     /// used for bootstrapping the designated dealer at account-creation
@@ -500,6 +508,32 @@ module Diem {
 
     }
 
+
+
+    ///////////////////////////////////////////////////////////////////////////
+
+    ///////////////////////////////////////////////////////////////////////////
+    // Upgrade to Concurrent Preburns for DDs
+    ///////////////////////////////////////////////////////////////////////////
+
+    // when dd tries to preburn
+    public fun remove_preburn_singleton_resource_if_exists<CoinType>(account: &signer) acquires Preburn<CoinType> {
+        let sender = Signer::address_of(account);
+        if (exists<Preburn<CoinType>>(sender)) {
+            let Preburn<CoinType> {} = move_from<Preburn<CoinType>>(sender);
+        }
+    }
+
+    // when DD tries to preburn ideally but actually need tc signer..to create preburn thing
+    public fun create_concurrent_preburn_resource<CoinType>(
+        account: &signer,
+    ) acquires CurrencyInfo {
+        Roles::assert_designated_dealer(account);
+        assert(!is_synthetic_currency<CoinType>(), Errors::invalid_argument(EIS_SYNTHETIC_CURRENCY));
+        if (!exists<Preburn<CoinType>>(Signer::address_of(account)))
+            move_to(account, create_preburn<CoinType>(tc_account))
+    }
+
     ///////////////////////////////////////////////////////////////////////////
 
     /// Sends `coin` to the preburn queue for `account`, where it will wait to either be burned
@@ -512,7 +546,10 @@ module Diem {
     ) acquires CurrencyInfo, Preburn {
         Roles::assert_designated_dealer(account);
         let sender = Signer::address_of(account);
-        assert(exists<Preburn<CoinType>>(sender), Errors::not_published(EPREBURN));
+        // assert(exists<Preburn<CoinType>>(sender), Errors::not_published(EPREBURN));
+        if (exists<Preburn<CoinType>>(sender)) {
+
+        }
         preburn_with_resource(coin, borrow_global_mut<Preburn<CoinType>>(sender), sender);
     }
     spec fun preburn_to {
